@@ -291,7 +291,7 @@ export default function Q2BudgetTable({ id, items, title }: Q2BudgetTableProps) 
       if (!aggregated[dept]) {
         aggregated[dept] = { apr: 0, may: 0, jun: 0 };
       }
-      aggregated[dept].apr += item.aprActual || 0;
+      aggregated[dept].apr += item.aprBudget || 0;
       aggregated[dept].may += item.mayActual || 0;
       aggregated[dept].jun += item.junActual || 0;
     });

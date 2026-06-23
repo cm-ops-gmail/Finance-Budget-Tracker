@@ -811,14 +811,14 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                 <span className="w-3 h-3 rounded-full bg-slate-900" />
                 <span className="text-gray-600 font-medium">10MS Limited (LTD)</span>
               </div>
-              <span className="font-bold text-gray-800">{((stats.ltdBudget / stats.combinedBudget) * 100).toFixed(0)}%</span>
+              <span className="font-bold text-gray-800">{((stats.ltdBudget / (stats.ltdBudget + stats.lcBudget)) * 100).toFixed(0)}%</span>
             </div>
             <div className="flex justify-between items-center text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-blue-500" />
                 <span className="text-gray-600 font-medium">Learning Center (LC)</span>
               </div>
-              <span className="font-bold text-gray-800">{((stats.lcBudget / stats.combinedBudget) * 100).toFixed(0)}%</span>
+              <span className="font-bold text-gray-800">{((stats.lcBudget / (stats.ltdBudget + stats.lcBudget)) * 100).toFixed(0)}%</span>
             </div>
           </div>
         </div>

@@ -162,6 +162,18 @@ function filterByTeam(username: string): (dataTeam: string) => boolean {
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use(express.json());
 
+// Health check — shows which env vars are present (safe, no values exposed)
+app.get("/api/health", (_req, res) => {
+  res.json({
+    ok: true,
+    env: {
+      GOOGLE_CLIENT_EMAIL: !!process.env.GOOGLE_CLIENT_EMAIL,
+      GOOGLE_PRIVATE_KEY: !!process.env.GOOGLE_PRIVATE_KEY,
+      GOOGLE_SPREADSHEET_ID: !!process.env.GOOGLE_SPREADSHEET_ID,
+    },
+  });
+});
+
 // Cache for teams list (5-minute TTL) — avoids refetching on every login page load
 let teamsCache: { teams: string[]; cachedAt: number } | null = null;
 
@@ -220,7 +232,7 @@ app.get("/api/teams", async (req, res) => {
     res.json({ success: true, teams });
   } catch (error: any) {
     console.error("Teams fetch error:", error);
-    res.status(500).json({ success: false, error: "Unable to fetch teams." });
+    res.status(500).json({ success: false, error: error?.message || "Unable to fetch teams." });
   }
 });
 
