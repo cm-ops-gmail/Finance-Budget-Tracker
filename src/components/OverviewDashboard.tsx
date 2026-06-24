@@ -27,7 +27,7 @@ import {
   GitCompareArrows,
   Info,
 } from "lucide-react";
-import { exportPDF } from "../utils/exportPDF";
+import { exportPDF, captureChart } from "../utils/exportPDF";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -68,8 +68,8 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
   const [openPopover, setOpenPopover] = useState<string | null>(null);
 
   // ── Team-wise comparison state ─────────────────────────────────────────────
-  const [tcTeam1, setTcTeam1] = useState<string>("NONE");
-  const [tcTeam2, setTcTeam2] = useState<string>("NONE");
+  const [tcTeam1, setTcTeam1] = useState<string[]>([]);
+  const [tcTeam2, setTcTeam2] = useState<string[]>([]);
   const [tcPeriod, setTcPeriod] = useState<string>("Q2");
 
   // Close popovers when clicking outside
@@ -194,8 +194,8 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
   }), [computePM, cmpPeriodA, cmpPeriodB, cmpTeam]);
 
   const tcMetrics = useMemo(() => ({
-    T1: tcTeam1 !== "NONE" ? computePM(tcPeriod, [tcTeam1]) : null,
-    T2: tcTeam2 !== "NONE" ? computePM(tcPeriod, [tcTeam2]) : null,
+    T1: tcTeam1.length > 0 ? computePM(tcPeriod, tcTeam1) : null,
+    T2: tcTeam2.length > 0 ? computePM(tcPeriod, tcTeam2) : null,
   }), [computePM, tcPeriod, tcTeam1, tcTeam2]);
 
   // Format currency helpers (Traditional integer formatting in BDT/INR style with commas)
@@ -280,7 +280,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
     setSelectedMonth("ALL");
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const fmtNum = (n: number) =>
       new Intl.NumberFormat("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
     const { ltdQ2Clean, lcQ2Clean, ltdQ3Clean, lcQ3Clean } = filteredData;
@@ -304,6 +304,16 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
       ? ((activeMetrics.variance / activeMetrics.budget) * 100).toFixed(1) + "%"
       : "—";
     const periodLabel = TIME_PERIODS.find(t => t.value === timePeriod)?.label || timePeriod;
+
+    // Capture charts in parallel
+    const chartResults = await Promise.all([
+      captureChart("pdf-card-dept", "Budget vs Actual — All Departments"),
+      captureChart("pdf-card-trend", "Monthly Cash Outflow Speed"),
+      captureChart("pdf-card-entity", "Entity Share Breakdown"),
+      captureChart("pdf-card-category", "Top Organizational Categories"),
+    ]);
+    const chartImages = chartResults.filter((c): c is { title: string; dataUrl: string } => c !== null);
+
     exportPDF({
       title: "Executive Overview Report",
       subtitle: `Period: ${periodLabel}  ·  Entity: ${entityFilter === "ALL" ? "All Entities" : entityFilter}`,
@@ -321,6 +331,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
       ],
       columns: ["Quarter", "Team / Dept", "Cost Type", "Description", "Budget", "Actual", "Variance"],
       rows,
+      chartImages,
       filename: `Overview-Report-${new Date().toISOString().slice(0, 10)}.pdf`,
     });
   };
@@ -786,7 +797,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
       />
 
       {/* Budget vs Actual by Department Bar Chart */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm mt-6 mb-6">
+      <div id="pdf-card-dept" className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm mt-6 mb-6">
         <h3 className="font-bold text-gray-800 text-[15px] mb-6 flex items-center gap-2">
           <ChartBar className="w-5 h-5 text-blue-500" />
           Budget vs Actual — All Departments
@@ -829,7 +840,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
       {/* Grid for Spend Trend & Entity Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Spend Trend Area Chart */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:col-span-2">
+        <div id="pdf-card-trend" className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:col-span-2">
           <div className="flex justify-between items-center mb-6">
             <div>
               <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
@@ -888,7 +899,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
         </div>
 
         {/* Entity Donut Distribution Chart */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
+        <div id="pdf-card-entity" className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
           <div>
             <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5 mb-1">
               <Layers className="w-4 h-4 text-gray-400" />
@@ -942,7 +953,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
       </div>
 
       {/* Top Department Budgets Analysis */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+      <div id="pdf-card-category" className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
         <div>
           <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5 mb-1">
             <Building2 className="w-4 h-4 text-gray-400" />
@@ -1487,7 +1498,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                   Compare two teams head-to-head for any period — independent of all other filters.
                 </p>
               </div>
-              {tcPeriod !== "NONE" && (
+              {tcTeam1.length > 0 && tcTeam2.length > 0 && (
                 <span className="text-[11px] font-bold text-indigo-200 bg-indigo-800/50 border border-indigo-600/40 px-3 py-1 rounded-full self-start sm:self-auto">
                   {periodLabel}
                 </span>
@@ -1497,14 +1508,13 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
             {/* Filters */}
             <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-3">
               <div className="min-w-[180px] flex-1">
-                <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">Team 1</label>
+                <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">Team 1 (select one or more)</label>
                 <SearchableSelect
                   value={tcTeam1}
-                  onChange={(v: string) => setTcTeam1(v)}
+                  onChange={setTcTeam1}
                   options={uniqueTeams}
-                  allOptionLabel="Select Team 1..."
-                  allOptionValue="NONE"
-                  multiple={false}
+                  allOptionLabel="Select teams..."
+                  multiple={true}
                 />
               </div>
 
@@ -1513,14 +1523,13 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
               </div>
 
               <div className="min-w-[180px] flex-1">
-                <label className="block text-[10px] font-black uppercase text-violet-500 tracking-wider mb-1.5">Team 2</label>
+                <label className="block text-[10px] font-black uppercase text-violet-500 tracking-wider mb-1.5">Team 2 (select one or more)</label>
                 <SearchableSelect
                   value={tcTeam2}
-                  onChange={(v: string) => setTcTeam2(v)}
+                  onChange={setTcTeam2}
                   options={uniqueTeams}
-                  allOptionLabel="Select Team 2..."
-                  allOptionValue="NONE"
-                  multiple={false}
+                  allOptionLabel="Select teams..."
+                  multiple={true}
                 />
               </div>
 
@@ -1555,14 +1564,14 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                         <th className="py-4 px-4">
                           <div className="flex items-center justify-end gap-2">
                             <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
-                            <span className="text-sm font-bold text-blue-700 truncate max-w-[140px]">{tcTeam1}</span>
+                            <span className="text-sm font-bold text-blue-700 truncate max-w-[140px]">{tcTeam1.join(", ")}</span>
                           </div>
                         </th>
                         <th className="py-4 px-3 text-center text-[10px] font-black text-gray-300 uppercase tracking-widest w-28">vs</th>
                         <th className="py-4 px-4 pr-6">
                           <div className="flex items-center gap-2">
                             <span className="w-2.5 h-2.5 rounded-full bg-violet-600 shrink-0" />
-                            <span className="text-sm font-bold text-violet-700 truncate max-w-[140px]">{tcTeam2}</span>
+                            <span className="text-sm font-bold text-violet-700 truncate max-w-[140px]">{tcTeam2.join(", ")}</span>
                           </div>
                         </th>
                       </tr>
@@ -1604,7 +1613,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                 {tcChartData.length > 0 && (
                   <div className="px-6 pt-4 pb-6 border-t border-gray-100">
                     <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-4">
-                      Visual Comparison — {tcTeam1} vs {tcTeam2}
+                      Visual Comparison — {tcTeam1.join(", ")} vs {tcTeam2.join(", ")}
                     </p>
                     <div className="h-56">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1617,7 +1626,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                             contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
                           />
                           <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-                            formatter={v => v === "T1" ? tcTeam1 : tcTeam2}
+                            formatter={v => v === "T1" ? tcTeam1.join(", ") : tcTeam2.join(", ")}
                           />
                           <Bar dataKey="T1" name="T1" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                           <Bar dataKey="T2" name="T2" fill="#7c3aed" radius={[4, 4, 0, 0]} />
