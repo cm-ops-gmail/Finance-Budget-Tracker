@@ -60,15 +60,20 @@ export default function SearchableSelect({
   const displayLabel = useMemo(() => {
     if (multiple) {
       const arr = Array.isArray(value) ? value : [value];
-      if (arr.includes(allOptionValue) || arr.length === 0) {
-        return allOptionLabel;
-      }
-      const labels = arr.map(v => normalizedOptions.find(o => o.value === v)?.label || v);
-      return labels.join(", ");
+      if (arr.includes(allOptionValue) || arr.length === 0) return allOptionLabel;
+      if (arr.length === 1) return normalizedOptions.find(o => o.value === arr[0])?.label || arr[0];
+      return `${arr.length} selected`;
     } else {
       return activeOption?.label || placeholder;
     }
   }, [value, multiple, activeOption, normalizedOptions, allOptionValue, allOptionLabel, placeholder]);
+
+  const selectedChips = useMemo(() => {
+    if (!multiple) return [];
+    const arr = Array.isArray(value) ? value : [value];
+    if (arr.includes(allOptionValue) || arr.length === 0) return [];
+    return arr.map(v => ({ value: v, label: normalizedOptions.find(o => o.value === v)?.label || v }));
+  }, [value, multiple, normalizedOptions, allOptionValue]);
 
   // Filter options based on search input
   const filteredOptions = useMemo(() => {
@@ -133,8 +138,9 @@ export default function SearchableSelect({
   };
 
   return (
-    <div ref={containerRef} className={`relative select-none ${className}`}>
-      {/* Trigger Button */}
+    <div ref={containerRef} className={`select-none ${className}`}>
+      {/* Trigger + dropdown wrapper (relative for dropdown positioning) */}
+      <div className="relative">
       <button
         type="button"
         disabled={disabled}
@@ -155,7 +161,7 @@ export default function SearchableSelect({
 
       {/* Floating Popover Dropdown */}
       {isOpen && (
-        <div className="absolute z-55 left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 animate-fade-in divide-y divide-gray-100 min-w-[200px]">
+        <div className="absolute z-[55] left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 divide-y divide-gray-100 min-w-[200px]">
           {/* Search Box */}
           <div className="p-2 relative flex items-center gap-1.5 bg-slate-50/50 rounded-t-xl">
             <Search className="w-3.5 h-3.5 text-gray-400 shrink-0 ml-1.5" />
@@ -208,6 +214,25 @@ export default function SearchableSelect({
               })
             )}
           </div>
+        </div>
+      )}
+      </div>{/* end relative wrapper */}
+
+      {/* Selected chips (multi-select only) */}
+      {selectedChips.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {selectedChips.map(chip => (
+            <span key={chip.value} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-semibold rounded-full max-w-full">
+              <span className="truncate max-w-[140px]">{chip.label}</span>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); handleSelect(chip.value); }}
+                className="text-blue-400 hover:text-blue-700 shrink-0 ml-0.5"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </span>
+          ))}
         </div>
       )}
     </div>

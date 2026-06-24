@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { 
   SpreadsheetData, 
   Q2Item, 
@@ -66,6 +67,8 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
   const [cmpPeriodA, setCmpPeriodA] = useState<string>("Q2");
   const [cmpPeriodB, setCmpPeriodB] = useState<string>("Q3");
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
+  const [popoverContent, setPopoverContent] = useState<React.ReactNode>(null);
 
   // ── Team-wise comparison state ─────────────────────────────────────────────
   const [tcTeam1, setTcTeam1] = useState<string[]>([]);
@@ -74,7 +77,7 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
 
   // Close popovers when clicking outside
   React.useEffect(() => {
-    const close = () => setOpenPopover(null);
+    const close = () => { setOpenPopover(null); setPopoverPos(null); setPopoverContent(null); };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, []);
@@ -573,6 +576,25 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
 
   return (
     <div id={id} className="space-y-6">
+      {/* Global popover portal — renders above ALL elements */}
+      {openPopover && popoverPos && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            top: popoverPos.top,
+            left: popoverPos.left,
+            transform: "translate(-50%, calc(-100% - 10px))",
+            zIndex: 99999,
+          }}
+          className="w-72 bg-gray-950 text-white rounded-2xl p-4 shadow-2xl border border-white/10 pointer-events-auto"
+          onClick={e => e.stopPropagation()}
+        >
+          {popoverContent}
+          <div className="absolute -bottom-[5px] left-1/2 -translate-x-1/2 w-2.5 h-2.5 bg-gray-950 border-r border-b border-white/10 rotate-45" />
+        </div>,
+        document.body
+      )}
+
       {/* Selection Panel & Title */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white border border-gray-200 text-gray-900 rounded-xl p-6 shadow-sm">
         <div>
@@ -990,22 +1012,30 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
         const labelA = COMPARISON_PERIODS.find(p => p.value === cmpPeriodA)?.label ?? cmpPeriodA;
         const labelB = COMPARISON_PERIODS.find(p => p.value === cmpPeriodB)?.label ?? cmpPeriodB;
 
-        // ── Popover helper ──────────────────────────────────────────────────────
+        // ── Popover helper — uses global portal, no overflow clipping ──────────
         const Popover = ({ id, children }: { id: string; children: React.ReactNode }) => (
-          <div className="relative inline-flex" onClick={e => e.stopPropagation()}>
+          <div className="inline-flex" onClick={e => e.stopPropagation()}>
             <button
               type="button"
-              onClick={e => { e.stopPropagation(); setOpenPopover(openPopover === id ? null : id); }}
-              className="ml-1.5 w-[18px] h-[18px] rounded-full bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-500 flex items-center justify-center transition-colors shrink-0"
+              onClick={e => {
+                e.stopPropagation();
+                if (openPopover === id) {
+                  setOpenPopover(null);
+                  setPopoverPos(null);
+                  setPopoverContent(null);
+                } else {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setPopoverPos({ top: rect.top, left: rect.left + rect.width / 2 });
+                  setPopoverContent(children);
+                  setOpenPopover(id);
+                }
+              }}
+              className={`ml-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                openPopover === id ? "bg-blue-100 text-blue-500" : "bg-gray-100 text-gray-400 hover:bg-blue-100 hover:text-blue-500"
+              }`}
             >
               <Info className="w-2.5 h-2.5" />
             </button>
-            {openPopover === id && (
-              <div className="absolute bottom-full right-0 mb-2.5 w-72 bg-gray-950 text-white rounded-2xl p-4 shadow-2xl z-50 border border-white/10">
-                {children}
-                <div className="absolute -bottom-[5px] right-4 w-2.5 h-2.5 bg-gray-950 border-r border-b border-white/10 rotate-45" />
-              </div>
-            )}
           </div>
         );
 
@@ -1445,20 +1475,28 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
           })();
 
           return (
-            <div className="relative inline-flex" onClick={e => e.stopPropagation()}>
+            <div className="inline-flex" onClick={e => e.stopPropagation()}>
               <button
                 type="button"
-                onClick={e => { e.stopPropagation(); setOpenPopover(openPopover === id ? null : id); }}
-                className="ml-1.5 w-[18px] h-[18px] rounded-full bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-500 flex items-center justify-center transition-colors shrink-0"
+                onClick={e => {
+                  e.stopPropagation();
+                  if (openPopover === id) {
+                    setOpenPopover(null);
+                    setPopoverPos(null);
+                    setPopoverContent(null);
+                  } else {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setPopoverPos({ top: rect.top, left: rect.left + rect.width / 2 });
+                    setPopoverContent(content);
+                    setOpenPopover(id);
+                  }
+                }}
+                className={`ml-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                  openPopover === id ? "bg-blue-100 text-blue-500" : "bg-gray-100 text-gray-400 hover:bg-blue-100 hover:text-blue-500"
+                }`}
               >
                 <Info className="w-2.5 h-2.5" />
               </button>
-              {openPopover === id && (
-                <div className="absolute bottom-full right-0 mb-2.5 w-64 bg-gray-950 text-white rounded-2xl p-4 shadow-2xl z-50 border border-white/10">
-                  {content}
-                  <div className="absolute -bottom-[5px] right-4 w-2.5 h-2.5 bg-gray-950 border-r border-b border-white/10 rotate-45" />
-                </div>
-              )}
             </div>
           );
         };
