@@ -10,6 +10,7 @@ import BudgetAttentionCards from "./BudgetAttentionCards.tsx";
 import {
   Wallet,
   TrendingUp,
+  TrendingDown,
   CheckCircle,
   DollarSign,
   Building2,
@@ -22,7 +23,8 @@ import {
   AlertCircle,
   Trophy,
   ChartBar,
-  Download
+  Download,
+  GitCompareArrows
 } from "lucide-react";
 import { exportPDF } from "../utils/exportPDF";
 import {
@@ -58,6 +60,11 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
   const [selectedTeam, setSelectedTeam] = useState<string[]>(["ALL"]);
   const [selectedCostHeading, setSelectedCostHeading] = useState<string[]>(["ALL"]);
 
+  // ── Comparison section state (independent from main filters) ─────────────────
+  const [cmpTeam, setCmpTeam] = useState<string>("ALL");
+  const [cmpPeriodA, setCmpPeriodA] = useState<string>("Q2");
+  const [cmpPeriodB, setCmpPeriodB] = useState<string>("Q3");
+
   const timePeriod = useMemo(() => {
     if (selectedMonth !== "ALL") return selectedMonth;
     return selectedQuarter;
@@ -80,6 +87,74 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
     { value: "LTD", label: "10 MS LTD" },
     { value: "LC", label: "Learning Center" }
   ];
+
+  const COMPARISON_PERIODS = [
+    { value: "Q2", label: "Q2 (Apr–Jun)" },
+    { value: "Q3", label: "Q3 (Jul–Sep)" },
+    { value: "APR", label: "April 2026" },
+    { value: "MAY", label: "May 2026" },
+    { value: "JUN", label: "June 2026" },
+    { value: "JUL", label: "July 2026" },
+    { value: "AUG", label: "August 2026" },
+    { value: "SEP", label: "September 2026" },
+  ];
+
+  const computePeriodMetrics = (period: string, team: string) => {
+    const filterQ2 = (items: Q2Item[]) =>
+      items.filter(i => {
+        if (i.isSubtotal || i.isHeader) return false;
+        if (team !== "ALL" && i.department !== team) return false;
+        return true;
+      });
+    const filterQ3 = (items: Q3Item[]) =>
+      items.filter(i => {
+        if (i.isSubtotal) return false;
+        if (team !== "ALL" && i.team !== team) return false;
+        return true;
+      });
+
+    let budget = 0, actual = 0, remaining = 0;
+
+    const isQ2Period = period === "Q2" || ["APR","MAY","JUN"].includes(period);
+    const isQ3Period = period === "Q3" || ["JUL","AUG","SEP"].includes(period);
+
+    if (isQ2Period) {
+      [...filterQ2(data.ltdQ2), ...filterQ2(data.lcQ2)].forEach(i => {
+        if (period === "Q2") {
+          budget += i.aprBudget + i.mayBudget + i.junBudget;
+          actual += i.aprBudget + i.mayActual + i.junActual;
+          remaining += i.mayRemaining + i.junRemaining;
+        } else if (period === "APR") {
+          budget += i.aprBudget; actual += i.aprBudget; remaining += 0;
+        } else if (period === "MAY") {
+          budget += i.mayBudget; actual += i.mayActual; remaining += i.mayRemaining;
+        } else if (period === "JUN") {
+          budget += i.junBudget; actual += i.junActual; remaining += i.junRemaining;
+        }
+      });
+    }
+
+    if (isQ3Period) {
+      [...filterQ3(data.ltdQ3), ...filterQ3(data.lcQ3)].forEach(i => {
+        if (period === "Q3") {
+          budget += i.julBudget + i.augBudget + i.sepBudget;
+          actual += i.julActual + i.augActual + i.sepActual;
+          remaining += i.julRem + i.augRem + i.sepRem;
+        } else if (period === "JUL") {
+          budget += i.julBudget; actual += i.julActual; remaining += i.julRem;
+        } else if (period === "AUG") {
+          budget += i.augBudget; actual += i.augActual; remaining += i.augRem;
+        } else if (period === "SEP") {
+          budget += i.sepBudget; actual += i.sepActual; remaining += i.sepRem;
+        }
+      });
+    }
+
+    const variance = budget - actual;
+    const consumption = budget > 0 ? (actual / budget) * 100 : 0;
+    const variancePct = budget > 0 ? (variance / budget) * 100 : 0;
+    return { budget, actual, remaining, variance, consumption, variancePct };
+  };
 
   // Format currency helpers (Traditional integer formatting in BDT/INR style with commas)
   const formatBDT = (num: number): string => {
@@ -838,13 +913,13 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
             <BarChart data={categoryChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#64748b" }} />
-              <YAxis 
-                tickLine={false} 
-                axisLine={false} 
-                tickFormatter={(val) => formatCompact(val)} 
-                tick={{ fontSize: 10, fill: "#64748b" }} 
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(val) => formatCompact(val)}
+                tick={{ fontSize: 10, fill: "#64748b" }}
               />
-              <Tooltip 
+              <Tooltip
                 formatter={(value: any) => [formatBDT(Number(value)), undefined]}
                 contentStyle={{ background: "#0f172a", border: "none", borderRadius: "8px", color: "#fff" }}
               />
@@ -855,6 +930,243 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* ── Comparison Section ─────────────────────────────────────────────────── */}
+      {(() => {
+        const labelA = COMPARISON_PERIODS.find(p => p.value === cmpPeriodA)?.label ?? cmpPeriodA;
+        const labelB = COMPARISON_PERIODS.find(p => p.value === cmpPeriodB)?.label ?? cmpPeriodB;
+        const mA = computePeriodMetrics(cmpPeriodA, cmpTeam);
+        const mB = computePeriodMetrics(cmpPeriodB, cmpTeam);
+
+        const delta = (a: number, b: number) => {
+          const diff = b - a;
+          const pct = a !== 0 ? (diff / Math.abs(a)) * 100 : 0;
+          return { diff, pct };
+        };
+
+        const DeltaBadge = ({ a, b, invertColor = false }: { a: number; b: number; invertColor?: boolean }) => {
+          const { diff, pct } = delta(a, b);
+          if (diff === 0) return <span className="text-[10px] text-gray-400">—</span>;
+          const isUp = diff > 0;
+          const isGood = invertColor ? !isUp : isUp;
+          return (
+            <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold ${isGood ? "text-emerald-600" : "text-rose-500"}`}>
+              {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              {isUp ? "+" : ""}{pct.toFixed(1)}%
+            </span>
+          );
+        };
+
+        const MetricRow = ({ label, vA, vB, fmt, invertColor = false }: {
+          label: string; vA: number; vB: number;
+          fmt: (n: number) => string; invertColor?: boolean;
+        }) => (
+          <div className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
+            <span className="text-xs text-gray-500 w-28 shrink-0">{label}</span>
+            <span className="text-xs font-bold text-blue-700 w-32 text-right">{fmt(vA)}</span>
+            <div className="flex justify-center w-24">
+              <DeltaBadge a={vA} b={vB} invertColor={invertColor} />
+            </div>
+            <span className="text-xs font-bold text-slate-800 w-32 text-left pl-2">{fmt(vB)}</span>
+          </div>
+        );
+
+        const cmpChartData = [
+          { name: "Budget", A: mA.budget, B: mB.budget },
+          { name: "Actual", A: mA.actual, B: mB.actual },
+          { name: "Remaining", A: mA.remaining, B: mB.remaining },
+        ];
+
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-gray-800 text-[15px] flex items-center gap-2">
+                    <GitCompareArrows className="w-5 h-5 text-indigo-500" />
+                    Comparison
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Compare any two quarters or months side by side — independent of the filters above.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Comparison Filters */}
+            <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-4">
+              {/* Team */}
+              <div className="min-w-[180px]">
+                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-1.5 flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-blue-500" /> Team / Department
+                </label>
+                <div className="relative">
+                  <select
+                    value={cmpTeam}
+                    onChange={e => setCmpTeam(e.target.value)}
+                    className="appearance-none w-full bg-white border border-gray-200 text-gray-800 text-xs font-semibold rounded-lg pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
+                  >
+                    <option value="ALL">All Teams</option>
+                    {uniqueTeams.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                </div>
+              </div>
+
+              {/* Period A */}
+              <div className="min-w-[160px]">
+                <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">
+                  Period A
+                </label>
+                <div className="relative">
+                  <select
+                    value={cmpPeriodA}
+                    onChange={e => setCmpPeriodA(e.target.value)}
+                    className="appearance-none w-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+                  >
+                    {COMPARISON_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-blue-400">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pb-2.5 text-sm font-black text-gray-300 select-none">vs</div>
+
+              {/* Period B */}
+              <div className="min-w-[160px]">
+                <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1.5">
+                  Period B
+                </label>
+                <div className="relative">
+                  <select
+                    value={cmpPeriodB}
+                    onChange={e => setCmpPeriodB(e.target.value)}
+                    className="appearance-none w-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
+                  >
+                    {COMPARISON_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-indigo-400">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Side-by-side summary cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Period A card */}
+                <div className="bg-blue-50 rounded-xl border border-blue-100 p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                    <h4 className="text-sm font-bold text-blue-800">{labelA}</h4>
+                    {cmpTeam !== "ALL" && <span className="text-[10px] text-blue-500 font-semibold bg-blue-100 px-2 py-0.5 rounded-full">{cmpTeam}</span>}
+                  </div>
+                  <div className="space-y-2.5">
+                    {[
+                      { label: "Budget", val: formatBDT(mA.budget) },
+                      { label: "Actual Spend", val: formatBDT(mA.actual) },
+                      { label: "Remaining", val: formatBDT(mA.remaining) },
+                      { label: "Variance", val: (mA.variancePct >= 0 ? "+" : "") + mA.variancePct.toFixed(1) + "%" },
+                      { label: "Consumption", val: mA.consumption.toFixed(1) + "%" },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="flex justify-between items-center text-xs">
+                        <span className="text-blue-600">{label}</span>
+                        <span className="font-bold text-blue-900">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Period B card */}
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
+                    <h4 className="text-sm font-bold text-slate-700">{labelB}</h4>
+                    {cmpTeam !== "ALL" && <span className="text-[10px] text-slate-500 font-semibold bg-slate-200 px-2 py-0.5 rounded-full">{cmpTeam}</span>}
+                  </div>
+                  <div className="space-y-2.5">
+                    {[
+                      { label: "Budget", val: formatBDT(mB.budget) },
+                      { label: "Actual Spend", val: formatBDT(mB.actual) },
+                      { label: "Remaining", val: formatBDT(mB.remaining) },
+                      { label: "Variance", val: (mB.variancePct >= 0 ? "+" : "") + mB.variancePct.toFixed(1) + "%" },
+                      { label: "Consumption", val: mB.consumption.toFixed(1) + "%" },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">{label}</span>
+                        <span className="font-bold text-slate-800">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed delta table */}
+              <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+                <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-3">
+                  Change from {labelA} → {labelB}
+                </p>
+                {/* Column labels */}
+                <div className="flex items-center justify-between mb-1 px-0">
+                  <span className="text-[10px] text-gray-300 w-28" />
+                  <span className="text-[10px] font-bold text-blue-400 w-32 text-right">{labelA}</span>
+                  <span className="text-[10px] font-bold text-gray-400 w-24 text-center">Change</span>
+                  <span className="text-[10px] font-bold text-slate-500 w-32 pl-2">{labelB}</span>
+                </div>
+                <MetricRow label="Budget" vA={mA.budget} vB={mB.budget} fmt={formatBDT} />
+                <MetricRow label="Actual Spend" vA={mA.actual} vB={mB.actual} fmt={formatBDT} />
+                <MetricRow label="Remaining" vA={mA.remaining} vB={mB.remaining} fmt={formatBDT} />
+                <MetricRow
+                  label="Variance %"
+                  vA={mA.variancePct}
+                  vB={mB.variancePct}
+                  fmt={n => (n >= 0 ? "+" : "") + n.toFixed(1) + "%"}
+                />
+                <MetricRow
+                  label="Consumption %"
+                  vA={mA.consumption}
+                  vB={mB.consumption}
+                  fmt={n => n.toFixed(1) + "%"}
+                  invertColor
+                />
+              </div>
+
+              {/* Grouped bar chart */}
+              <div>
+                <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-3">
+                  Visual Comparison — Budget · Actual · Remaining
+                </p>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={cmpChartData} margin={{ top: 4, right: 10, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                      <YAxis tickLine={false} axisLine={false} tickFormatter={v => formatCompact(v)} tick={{ fontSize: 10, fill: "#64748b" }} />
+                      <Tooltip
+                        formatter={(value: any) => [formatBDT(Number(value)), undefined]}
+                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "8px", color: "#fff" }}
+                      />
+                      <Legend
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                        formatter={(value) => value === "A" ? labelA : labelB}
+                      />
+                      <Bar dataKey="A" name="A" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="B" name="B" fill="#1e293b" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
