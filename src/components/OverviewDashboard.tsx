@@ -61,11 +61,16 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
   const [selectedTeam, setSelectedTeam] = useState<string[]>(["ALL"]);
   const [selectedCostHeading, setSelectedCostHeading] = useState<string[]>(["ALL"]);
 
-  // ── Comparison section state (independent from main filters) ─────────────────
-  const [cmpTeam, setCmpTeam] = useState<string>("ALL");
+  // ── Comparison section state ───────────────────────────────────────────────
+  const [cmpTeam, setCmpTeam] = useState<string[]>(["ALL"]);
   const [cmpPeriodA, setCmpPeriodA] = useState<string>("Q2");
   const [cmpPeriodB, setCmpPeriodB] = useState<string>("Q3");
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+
+  // ── Team-wise comparison state ─────────────────────────────────────────────
+  const [tcTeam1, setTcTeam1] = useState<string>("NONE");
+  const [tcTeam2, setTcTeam2] = useState<string>("NONE");
+  const [tcPeriod, setTcPeriod] = useState<string>("Q2");
 
   // Close popovers when clicking outside
   React.useEffect(() => {
@@ -108,30 +113,30 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
     { value: "SEP", label: "September 2026" },
   ];
 
-  const cmpMetrics = useMemo(() => {
-    const compute = (period: string, team: string) => {
-      const isQ2 = period === "Q2" || ["APR","MAY","JUN"].includes(period);
-      const isQ3 = period === "Q3" || ["JUL","AUG","SEP"].includes(period);
+  // Shared compute helper — accepts string[] for team (["ALL"] = no filter)
+  const computePM = React.useCallback((period: string, teamArr: string[]) => {
+      const isAll = teamArr.length === 0 || teamArr.includes("ALL");
+      const isQ2 = period === "ALL" || period === "Q2" || ["APR","MAY","JUN"].includes(period);
+      const isQ3 = period === "ALL" || period === "Q3" || ["JUL","AUG","SEP"].includes(period);
 
       const fQ2 = (items: Q2Item[]) =>
-        items.filter(i => !i.isSubtotal && !i.isHeader && (team === "ALL" || i.department === team));
+        items.filter(i => !i.isSubtotal && !i.isHeader && (isAll || teamArr.includes(i.department)));
       const fQ3 = (items: Q3Item[]) =>
-        items.filter(i => !i.isSubtotal && (team === "ALL" || i.team === team));
+        items.filter(i => !i.isSubtotal && (isAll || teamArr.includes(i.team)));
 
       let budget = 0, actual = 0, remaining = 0;
       let ltdBudget = 0, ltdActual = 0, lcBudget = 0, lcActual = 0;
       const monthMap: Record<string, { budget: number; actual: number }> = {};
       const add = (name: string, b: number, a: number) => {
         if (!monthMap[name]) monthMap[name] = { budget: 0, actual: 0 };
-        monthMap[name].budget += b;
-        monthMap[name].actual += a;
+        monthMap[name].budget += b; monthMap[name].actual += a;
       };
 
       if (isQ2) {
         const processQ2 = (items: Q2Item[], isLtd: boolean) => {
           fQ2(items).forEach(i => {
             let b = 0, a = 0, r = 0;
-            if (period === "Q2") {
+            if (period === "Q2" || period === "ALL") {
               b = i.aprBudget + i.mayBudget + i.junBudget;
               a = i.aprBudget + i.mayActual + i.junActual;
               r = i.mayRemaining + i.junRemaining;
@@ -139,65 +144,59 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
               add("May",   i.mayBudget, i.mayActual);
               add("June",  i.junBudget, i.junActual);
             } else if (period === "APR") {
-              b = i.aprBudget; a = i.aprBudget; r = 0;
-              add("April", i.aprBudget, i.aprBudget);
+              b = i.aprBudget; a = i.aprBudget; r = 0; add("April", i.aprBudget, i.aprBudget);
             } else if (period === "MAY") {
-              b = i.mayBudget; a = i.mayActual; r = i.mayRemaining;
-              add("May", i.mayBudget, i.mayActual);
+              b = i.mayBudget; a = i.mayActual; r = i.mayRemaining; add("May", i.mayBudget, i.mayActual);
             } else if (period === "JUN") {
-              b = i.junBudget; a = i.junActual; r = i.junRemaining;
-              add("June", i.junBudget, i.junActual);
+              b = i.junBudget; a = i.junActual; r = i.junRemaining; add("June", i.junBudget, i.junActual);
             }
             budget += b; actual += a; remaining += r;
-            if (isLtd) { ltdBudget += b; ltdActual += a; }
-            else        { lcBudget  += b; lcActual  += a; }
+            if (isLtd) { ltdBudget += b; ltdActual += a; } else { lcBudget += b; lcActual += a; }
           });
         };
-        processQ2(data.ltdQ2, true);
-        processQ2(data.lcQ2, false);
+        processQ2(data.ltdQ2, true); processQ2(data.lcQ2, false);
       }
 
       if (isQ3) {
         const processQ3 = (items: Q3Item[], isLtd: boolean) => {
           fQ3(items).forEach(i => {
             let b = 0, a = 0, r = 0;
-            if (period === "Q3") {
+            if (period === "Q3" || period === "ALL") {
               b = i.julBudget + i.augBudget + i.sepBudget;
               a = i.julActual + i.augActual + i.sepActual;
               r = i.julRem + i.augRem + i.sepRem;
-              add("July",      i.julBudget, i.julActual);
-              add("August",    i.augBudget, i.augActual);
-              add("September", i.sepBudget, i.sepActual);
+              add("July", i.julBudget, i.julActual); add("August", i.augBudget, i.augActual); add("September", i.sepBudget, i.sepActual);
             } else if (period === "JUL") {
-              b = i.julBudget; a = i.julActual; r = i.julRem;
-              add("July", i.julBudget, i.julActual);
+              b = i.julBudget; a = i.julActual; r = i.julRem; add("July", i.julBudget, i.julActual);
             } else if (period === "AUG") {
-              b = i.augBudget; a = i.augActual; r = i.augRem;
-              add("August", i.augBudget, i.augActual);
+              b = i.augBudget; a = i.augActual; r = i.augRem; add("August", i.augBudget, i.augActual);
             } else if (period === "SEP") {
-              b = i.sepBudget; a = i.sepActual; r = i.sepRem;
-              add("September", i.sepBudget, i.sepActual);
+              b = i.sepBudget; a = i.sepActual; r = i.sepRem; add("September", i.sepBudget, i.sepActual);
             }
             budget += b; actual += a; remaining += r;
-            if (isLtd) { ltdBudget += b; ltdActual += a; }
-            else        { lcBudget  += b; lcActual  += a; }
+            if (isLtd) { ltdBudget += b; ltdActual += a; } else { lcBudget += b; lcActual += a; }
           });
         };
-        processQ3(data.ltdQ3, true);
-        processQ3(data.lcQ3, false);
+        processQ3(data.ltdQ3, true); processQ3(data.lcQ3, false);
       }
 
-      const variance    = budget - actual;
+      const variance = budget - actual;
       const variancePct = budget > 0 ? (variance / budget) * 100 : 0;
-      const consumption = budget > 0 ? (actual  / budget) * 100 : 0;
+      const consumption = budget > 0 ? (actual / budget) * 100 : 0;
       const months = Object.entries(monthMap).map(([name, v]) => ({ name, ...v }));
-
       return { budget, actual, remaining, variance, variancePct, consumption,
                ltdBudget, ltdActual, lcBudget, lcActual, months };
-    };
+  }, [data]);
 
-    return { A: compute(cmpPeriodA, cmpTeam), B: compute(cmpPeriodB, cmpTeam) };
-  }, [data, cmpPeriodA, cmpPeriodB, cmpTeam]);
+  const cmpMetrics = useMemo(() => ({
+    A: computePM(cmpPeriodA, cmpTeam),
+    B: computePM(cmpPeriodB, cmpTeam),
+  }), [computePM, cmpPeriodA, cmpPeriodB, cmpTeam]);
+
+  const tcMetrics = useMemo(() => ({
+    T1: tcTeam1 !== "NONE" ? computePM(tcPeriod, [tcTeam1]) : null,
+    T2: tcTeam2 !== "NONE" ? computePM(tcPeriod, [tcTeam2]) : null,
+  }), [computePM, tcPeriod, tcTeam1, tcTeam2]);
 
   // Format currency helpers (Traditional integer formatting in BDT/INR style with commas)
   const formatBDT = (num: number): string => {
@@ -1190,57 +1189,52 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                   Compare any two quarters or months — independent of the filters above.
                 </p>
               </div>
-              {cmpTeam !== "ALL" && (
+              {!cmpTeam.includes("ALL") && cmpTeam.length > 0 && (
                 <span className="text-[11px] font-bold text-blue-300 bg-blue-900/40 border border-blue-700/40 px-3 py-1 rounded-full self-start sm:self-auto">
-                  {cmpTeam}
+                  {cmpTeam.length === 1 ? cmpTeam[0] : `${cmpTeam.length} teams`}
                 </span>
               )}
             </div>
 
             {/* ── Filters ────────────────────────────────────────────────────── */}
             <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-3">
-              <div className="min-w-[190px]">
+              <div className="min-w-[200px] flex-1">
                 <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-1.5">
                   Team / Department
                 </label>
-                <div className="relative">
-                  <select value={cmpTeam} onChange={e => setCmpTeam(e.target.value)}
-                    className="appearance-none w-full bg-white border border-gray-200 text-gray-800 text-xs font-semibold rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-pointer">
-                    <option value="ALL">All Teams</option>
-                    {uniqueTeams.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
-                  </div>
-                </div>
+                <SearchableSelect
+                  value={cmpTeam}
+                  onChange={setCmpTeam}
+                  options={uniqueTeams}
+                  allOptionLabel="All Teams"
+                  multiple
+                />
               </div>
 
               <div className="min-w-[160px]">
                 <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">Period A</label>
-                <div className="relative">
-                  <select value={cmpPeriodA} onChange={e => setCmpPeriodA(e.target.value)}
-                    className="appearance-none w-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer">
-                    {COMPARISON_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-blue-400">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
-                  </div>
-                </div>
+                <SearchableSelect
+                  value={cmpPeriodA}
+                  onChange={(v: string) => setCmpPeriodA(v)}
+                  options={COMPARISON_PERIODS}
+                  allOptionLabel="All Periods"
+                  allOptionValue="ALL"
+                  multiple={false}
+                />
               </div>
 
               <span className="pb-2 text-xs font-black text-gray-300 select-none">vs</span>
 
               <div className="min-w-[160px]">
                 <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1.5">Period B</label>
-                <div className="relative">
-                  <select value={cmpPeriodB} onChange={e => setCmpPeriodB(e.target.value)}
-                    className="appearance-none w-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer">
-                    {COMPARISON_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-indigo-400">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
-                  </div>
-                </div>
+                <SearchableSelect
+                  value={cmpPeriodB}
+                  onChange={(v: string) => setCmpPeriodB(v)}
+                  options={COMPARISON_PERIODS}
+                  allOptionLabel="All Periods"
+                  allOptionValue="ALL"
+                  multiple={false}
+                />
               </div>
             </div>
 
@@ -1333,6 +1327,307 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
                 </ResponsiveContainer>
               </div>
             </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Team-wise Comparison ───────────────────────────────────────────────── */}
+      {(() => {
+        const { T1, T2 } = tcMetrics;
+        const periodLabel = COMPARISON_PERIODS.find(p => p.value === tcPeriod)?.label ?? tcPeriod;
+
+        type PM = NonNullable<typeof T1>;
+
+        // ── reuse Delta component logic inline ──────────────────────────────────
+        const Delta2 = ({ a, b, lowerIsBetter = false }: { a: number; b: number; lowerIsBetter?: boolean }) => {
+          if (a === 0 && b === 0) return <span className="text-[10px] text-gray-300">—</span>;
+          const diff = b - a;
+          const pct = a !== 0 ? (diff / Math.abs(a)) * 100 : (b !== 0 ? 100 : 0);
+          if (Math.abs(pct) < 0.05) return <span className="text-[10px] text-gray-400">≈ 0%</span>;
+          const isUp = diff > 0;
+          const isGood = lowerIsBetter ? !isUp : isUp;
+          return (
+            <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${
+              isGood ? "text-emerald-700 bg-emerald-50" : "text-rose-600 bg-rose-50"
+            }`}>
+              {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              {isUp ? "+" : ""}{pct.toFixed(1)}%
+            </span>
+          );
+        };
+
+        // ── popover for a single cell ───────────────────────────────────────────
+        const TCPopover = ({ id, m, metric }: { id: string; m: PM; metric: "budget"|"actual"|"remaining"|"variance"|"consumption" }) => {
+          const content = (() => {
+            if (metric === "budget") return (
+              <>
+                <p className="text-[11px] font-bold text-white mb-2">Budget Breakdown</p>
+                <div className="space-y-1.5">
+                  {[["10MS LTD", m.ltdBudget], ["Learning Center", m.lcBudget]].map(([n, v]) => (
+                    <div key={String(n)} className="flex justify-between text-[11px]">
+                      <span className="text-gray-400">{n}</span>
+                      <span className="text-white font-semibold">{formatBDT(Number(v))}</span>
+                    </div>
+                  ))}
+                  {m.months.length > 0 && <div className="border-t border-white/10 pt-2 mt-2 space-y-1">
+                    {m.months.map(mo => (
+                      <div key={mo.name} className="flex justify-between text-[11px]">
+                        <span className="text-gray-400">{mo.name}</span>
+                        <span className="text-white font-semibold">{formatBDT(mo.budget)}</span>
+                      </div>
+                    ))}
+                  </div>}
+                </div>
+              </>
+            );
+            if (metric === "actual") return (
+              <>
+                <p className="text-[11px] font-bold text-white mb-2">Actual Spend Breakdown</p>
+                <div className="space-y-1.5">
+                  {[["10MS LTD", m.ltdActual], ["Learning Center", m.lcActual]].map(([n, v]) => (
+                    <div key={String(n)} className="flex justify-between text-[11px]">
+                      <span className="text-gray-400">{n}</span>
+                      <span className="text-white font-semibold">{formatBDT(Number(v))}</span>
+                    </div>
+                  ))}
+                  {m.months.length > 0 && <div className="border-t border-white/10 pt-2 mt-2 space-y-1">
+                    {m.months.map(mo => (
+                      <div key={mo.name} className="flex justify-between text-[11px]">
+                        <span className="text-gray-400">{mo.name}</span>
+                        <span className="text-white font-semibold">{formatBDT(mo.actual)}</span>
+                      </div>
+                    ))}
+                  </div>}
+                </div>
+              </>
+            );
+            if (metric === "remaining") return (
+              <>
+                <p className="text-[11px] font-bold text-white mb-2">Remaining</p>
+                <div className="bg-white/5 rounded-lg px-2.5 py-2 font-mono text-[10px] space-y-0.5">
+                  <div className="text-gray-400">Budget  = {formatBDT(m.budget)}</div>
+                  <div className="text-gray-400">Actual  = {formatBDT(m.actual)}</div>
+                  <div className="border-t border-white/10 pt-1 text-white font-semibold">Remaining = {formatBDT(m.remaining)}</div>
+                </div>
+              </>
+            );
+            if (metric === "variance") return (
+              <>
+                <p className="text-[11px] font-bold text-white mb-2">Variance</p>
+                <div className="bg-white/5 rounded-lg px-2.5 py-2 font-mono text-[10px] space-y-0.5">
+                  <div className="text-gray-400">Budget − Actual = Variance</div>
+                  <div className="text-gray-400">{formatBDT(m.budget)} − {formatBDT(m.actual)}</div>
+                  <div className="text-white font-semibold pt-0.5">{formatBDT(m.variance)} ({(m.variancePct >= 0 ? "+" : "") + m.variancePct.toFixed(1)}%)</div>
+                </div>
+              </>
+            );
+            return (
+              <>
+                <p className="text-[11px] font-bold text-white mb-2">Consumption</p>
+                <div className="bg-white/5 rounded-lg px-2.5 py-2 font-mono text-[10px] space-y-0.5">
+                  <div className="text-gray-400">Actual ÷ Budget × 100</div>
+                  <div className="text-gray-400">{formatBDT(m.actual)} ÷ {formatBDT(m.budget)}</div>
+                  <div className="text-white font-semibold pt-0.5">= {m.consumption.toFixed(2)}%</div>
+                </div>
+              </>
+            );
+          })();
+
+          return (
+            <div className="relative inline-flex" onClick={e => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); setOpenPopover(openPopover === id ? null : id); }}
+                className="ml-1.5 w-[18px] h-[18px] rounded-full bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-500 flex items-center justify-center transition-colors shrink-0"
+              >
+                <Info className="w-2.5 h-2.5" />
+              </button>
+              {openPopover === id && (
+                <div className="absolute bottom-full right-0 mb-2.5 w-64 bg-gray-950 text-white rounded-2xl p-4 shadow-2xl z-50 border border-white/10">
+                  {content}
+                  <div className="absolute -bottom-[5px] right-4 w-2.5 h-2.5 bg-gray-950 border-r border-b border-white/10 rotate-45" />
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        type MetricKey = "budget"|"actual"|"remaining"|"variance"|"consumption";
+        const tcRows: { icon: React.ReactNode; label: string; sub: string; key: MetricKey; fmt: (m: PM) => string; lowerIsBetter?: boolean }[] = [
+          { icon: <Wallet className="w-4 h-4 text-blue-500" />, label: "Budget", sub: "Total allocated", key: "budget", fmt: m => formatBDT(m.budget) },
+          { icon: <TrendingUp className="w-4 h-4 text-emerald-500" />, label: "Actual Spend", sub: "Audited disbursement", key: "actual", fmt: m => formatBDT(m.actual), lowerIsBetter: true },
+          { icon: <CheckCircle className="w-4 h-4 text-teal-500" />, label: "Remaining", sub: "Uncommitted funds", key: "remaining", fmt: m => formatBDT(m.remaining) },
+          { icon: <ArrowRightLeft className="w-4 h-4 text-violet-500" />, label: "Variance %", sub: "(Budget−Actual)/Budget", key: "variance", fmt: m => (m.variancePct >= 0 ? "+" : "") + m.variancePct.toFixed(1) + "%" },
+          { icon: <Percent className="w-4 h-4 text-orange-500" />, label: "Consumption", sub: "Actual / Budget × 100", key: "consumption", fmt: m => m.consumption.toFixed(1) + "%", lowerIsBetter: true },
+        ];
+
+        const rawVal = (m: PM | null, key: MetricKey): number => {
+          if (!m) return 0;
+          if (key === "variance") return m.variancePct;
+          return m[key];
+        };
+
+        const tcChartData = T1 && T2 ? [
+          { name: "Budget",    T1: T1.budget,    T2: T2.budget },
+          { name: "Actual",    T1: T1.actual,    T2: T2.actual },
+          { name: "Remaining", T1: T1.remaining, T2: T2.remaining },
+        ] : [];
+
+        return (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-indigo-900 to-violet-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-indigo-300" />
+                  Team-wise Comparison
+                </h3>
+                <p className="text-xs text-indigo-300 mt-0.5">
+                  Compare two teams head-to-head for any period — independent of all other filters.
+                </p>
+              </div>
+              {tcPeriod !== "NONE" && (
+                <span className="text-[11px] font-bold text-indigo-200 bg-indigo-800/50 border border-indigo-600/40 px-3 py-1 rounded-full self-start sm:self-auto">
+                  {periodLabel}
+                </span>
+              )}
+            </div>
+
+            {/* Filters */}
+            <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-3">
+              <div className="min-w-[180px] flex-1">
+                <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">Team 1</label>
+                <SearchableSelect
+                  value={tcTeam1}
+                  onChange={(v: string) => setTcTeam1(v)}
+                  options={uniqueTeams}
+                  allOptionLabel="Select Team 1..."
+                  allOptionValue="NONE"
+                  multiple={false}
+                />
+              </div>
+
+              <div className="flex items-end pb-2">
+                <span className="text-xs font-black text-gray-300 select-none">vs</span>
+              </div>
+
+              <div className="min-w-[180px] flex-1">
+                <label className="block text-[10px] font-black uppercase text-violet-500 tracking-wider mb-1.5">Team 2</label>
+                <SearchableSelect
+                  value={tcTeam2}
+                  onChange={(v: string) => setTcTeam2(v)}
+                  options={uniqueTeams}
+                  allOptionLabel="Select Team 2..."
+                  allOptionValue="NONE"
+                  multiple={false}
+                />
+              </div>
+
+              <div className="min-w-[160px]">
+                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-1.5">Period</label>
+                <SearchableSelect
+                  value={tcPeriod}
+                  onChange={(v: string) => setTcPeriod(v)}
+                  options={COMPARISON_PERIODS}
+                  allOptionLabel="All Periods"
+                  allOptionValue="ALL"
+                  multiple={false}
+                />
+              </div>
+            </div>
+
+            {/* Empty state */}
+            {(!T1 || !T2) ? (
+              <div className="py-16 text-center">
+                <Building2 className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-gray-400">Select two teams above to see the comparison</p>
+                <p className="text-xs text-gray-300 mt-1">You can also choose any period — quarter or individual month</p>
+              </div>
+            ) : (
+              <>
+                {/* Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px]">
+                    <thead>
+                      <tr className="border-b-2 border-gray-100">
+                        <th className="text-left py-4 pl-6 pr-3 text-[10px] font-black text-gray-400 uppercase tracking-widest w-44">Metric</th>
+                        <th className="py-4 px-4">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                            <span className="text-sm font-bold text-blue-700 truncate max-w-[140px]">{tcTeam1}</span>
+                          </div>
+                        </th>
+                        <th className="py-4 px-3 text-center text-[10px] font-black text-gray-300 uppercase tracking-widest w-28">vs</th>
+                        <th className="py-4 px-4 pr-6">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-violet-600 shrink-0" />
+                            <span className="text-sm font-bold text-violet-700 truncate max-w-[140px]">{tcTeam2}</span>
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tcRows.map((row, idx) => (
+                        <tr key={row.key} className={`border-b border-gray-50 hover:bg-gray-50/60 transition-colors ${idx % 2 === 0 ? "" : "bg-gray-50/30"}`}>
+                          <td className="py-4 pl-6 pr-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">{row.icon}</div>
+                              <div>
+                                <p className="text-xs font-bold text-gray-700">{row.label}</p>
+                                <p className="text-[10px] text-gray-400">{row.sub}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-4 px-4">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <span className="text-sm font-bold text-blue-700 tabular-nums">{row.fmt(T1)}</span>
+                              <TCPopover id={`tc-t1-${row.key}`} m={T1} metric={row.key} />
+                            </div>
+                          </td>
+                          <td className="py-4 px-3 text-center">
+                            <Delta2 a={rawVal(T1, row.key)} b={rawVal(T2, row.key)} lowerIsBetter={row.lowerIsBetter} />
+                          </td>
+                          <td className="py-4 px-4 pr-6">
+                            <div className="flex items-center gap-0.5">
+                              <span className="text-sm font-bold text-violet-700 tabular-nums">{row.fmt(T2)}</span>
+                              <TCPopover id={`tc-t2-${row.key}`} m={T2} metric={row.key} />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Bar chart */}
+                {tcChartData.length > 0 && (
+                  <div className="px-6 pt-4 pb-6 border-t border-gray-100">
+                    <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-4">
+                      Visual Comparison — {tcTeam1} vs {tcTeam2}
+                    </p>
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={tcChartData} margin={{ top: 4, right: 10, left: -10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                          <YAxis tickLine={false} axisLine={false} tickFormatter={v => formatCompact(v)} tick={{ fontSize: 10, fill: "#64748b" }} />
+                          <Tooltip
+                            formatter={(value: any) => [formatBDT(Number(value)), undefined]}
+                            contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
+                          />
+                          <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                            formatter={v => v === "T1" ? tcTeam1 : tcTeam2}
+                          />
+                          <Bar dataKey="T1" name="T1" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="T2" name="T2" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         );
       })()}
