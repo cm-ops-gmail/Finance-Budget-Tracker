@@ -24,7 +24,8 @@ import {
   Trophy,
   ChartBar,
   Download,
-  GitCompareArrows
+  GitCompareArrows,
+  Info,
 } from "lucide-react";
 import { exportPDF } from "../utils/exportPDF";
 import {
@@ -64,6 +65,14 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
   const [cmpTeam, setCmpTeam] = useState<string>("ALL");
   const [cmpPeriodA, setCmpPeriodA] = useState<string>("Q2");
   const [cmpPeriodB, setCmpPeriodB] = useState<string>("Q3");
+  const [openPopover, setOpenPopover] = useState<string | null>(null);
+
+  // Close popovers when clicking outside
+  React.useEffect(() => {
+    const close = () => setOpenPopover(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, []);
 
   const timePeriod = useMemo(() => {
     if (selectedMonth !== "ALL") return selectedMonth;
@@ -99,62 +108,96 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
     { value: "SEP", label: "September 2026" },
   ];
 
-  const computePeriodMetrics = (period: string, team: string) => {
-    const filterQ2 = (items: Q2Item[]) =>
-      items.filter(i => {
-        if (i.isSubtotal || i.isHeader) return false;
-        if (team !== "ALL" && i.department !== team) return false;
-        return true;
-      });
-    const filterQ3 = (items: Q3Item[]) =>
-      items.filter(i => {
-        if (i.isSubtotal) return false;
-        if (team !== "ALL" && i.team !== team) return false;
-        return true;
-      });
+  const cmpMetrics = useMemo(() => {
+    const compute = (period: string, team: string) => {
+      const isQ2 = period === "Q2" || ["APR","MAY","JUN"].includes(period);
+      const isQ3 = period === "Q3" || ["JUL","AUG","SEP"].includes(period);
 
-    let budget = 0, actual = 0, remaining = 0;
+      const fQ2 = (items: Q2Item[]) =>
+        items.filter(i => !i.isSubtotal && !i.isHeader && (team === "ALL" || i.department === team));
+      const fQ3 = (items: Q3Item[]) =>
+        items.filter(i => !i.isSubtotal && (team === "ALL" || i.team === team));
 
-    const isQ2Period = period === "Q2" || ["APR","MAY","JUN"].includes(period);
-    const isQ3Period = period === "Q3" || ["JUL","AUG","SEP"].includes(period);
+      let budget = 0, actual = 0, remaining = 0;
+      let ltdBudget = 0, ltdActual = 0, lcBudget = 0, lcActual = 0;
+      const monthMap: Record<string, { budget: number; actual: number }> = {};
+      const add = (name: string, b: number, a: number) => {
+        if (!monthMap[name]) monthMap[name] = { budget: 0, actual: 0 };
+        monthMap[name].budget += b;
+        monthMap[name].actual += a;
+      };
 
-    if (isQ2Period) {
-      [...filterQ2(data.ltdQ2), ...filterQ2(data.lcQ2)].forEach(i => {
-        if (period === "Q2") {
-          budget += i.aprBudget + i.mayBudget + i.junBudget;
-          actual += i.aprBudget + i.mayActual + i.junActual;
-          remaining += i.mayRemaining + i.junRemaining;
-        } else if (period === "APR") {
-          budget += i.aprBudget; actual += i.aprBudget; remaining += 0;
-        } else if (period === "MAY") {
-          budget += i.mayBudget; actual += i.mayActual; remaining += i.mayRemaining;
-        } else if (period === "JUN") {
-          budget += i.junBudget; actual += i.junActual; remaining += i.junRemaining;
-        }
-      });
-    }
+      if (isQ2) {
+        const processQ2 = (items: Q2Item[], isLtd: boolean) => {
+          fQ2(items).forEach(i => {
+            let b = 0, a = 0, r = 0;
+            if (period === "Q2") {
+              b = i.aprBudget + i.mayBudget + i.junBudget;
+              a = i.aprBudget + i.mayActual + i.junActual;
+              r = i.mayRemaining + i.junRemaining;
+              add("April", i.aprBudget, i.aprBudget);
+              add("May",   i.mayBudget, i.mayActual);
+              add("June",  i.junBudget, i.junActual);
+            } else if (period === "APR") {
+              b = i.aprBudget; a = i.aprBudget; r = 0;
+              add("April", i.aprBudget, i.aprBudget);
+            } else if (period === "MAY") {
+              b = i.mayBudget; a = i.mayActual; r = i.mayRemaining;
+              add("May", i.mayBudget, i.mayActual);
+            } else if (period === "JUN") {
+              b = i.junBudget; a = i.junActual; r = i.junRemaining;
+              add("June", i.junBudget, i.junActual);
+            }
+            budget += b; actual += a; remaining += r;
+            if (isLtd) { ltdBudget += b; ltdActual += a; }
+            else        { lcBudget  += b; lcActual  += a; }
+          });
+        };
+        processQ2(data.ltdQ2, true);
+        processQ2(data.lcQ2, false);
+      }
 
-    if (isQ3Period) {
-      [...filterQ3(data.ltdQ3), ...filterQ3(data.lcQ3)].forEach(i => {
-        if (period === "Q3") {
-          budget += i.julBudget + i.augBudget + i.sepBudget;
-          actual += i.julActual + i.augActual + i.sepActual;
-          remaining += i.julRem + i.augRem + i.sepRem;
-        } else if (period === "JUL") {
-          budget += i.julBudget; actual += i.julActual; remaining += i.julRem;
-        } else if (period === "AUG") {
-          budget += i.augBudget; actual += i.augActual; remaining += i.augRem;
-        } else if (period === "SEP") {
-          budget += i.sepBudget; actual += i.sepActual; remaining += i.sepRem;
-        }
-      });
-    }
+      if (isQ3) {
+        const processQ3 = (items: Q3Item[], isLtd: boolean) => {
+          fQ3(items).forEach(i => {
+            let b = 0, a = 0, r = 0;
+            if (period === "Q3") {
+              b = i.julBudget + i.augBudget + i.sepBudget;
+              a = i.julActual + i.augActual + i.sepActual;
+              r = i.julRem + i.augRem + i.sepRem;
+              add("July",      i.julBudget, i.julActual);
+              add("August",    i.augBudget, i.augActual);
+              add("September", i.sepBudget, i.sepActual);
+            } else if (period === "JUL") {
+              b = i.julBudget; a = i.julActual; r = i.julRem;
+              add("July", i.julBudget, i.julActual);
+            } else if (period === "AUG") {
+              b = i.augBudget; a = i.augActual; r = i.augRem;
+              add("August", i.augBudget, i.augActual);
+            } else if (period === "SEP") {
+              b = i.sepBudget; a = i.sepActual; r = i.sepRem;
+              add("September", i.sepBudget, i.sepActual);
+            }
+            budget += b; actual += a; remaining += r;
+            if (isLtd) { ltdBudget += b; ltdActual += a; }
+            else        { lcBudget  += b; lcActual  += a; }
+          });
+        };
+        processQ3(data.ltdQ3, true);
+        processQ3(data.lcQ3, false);
+      }
 
-    const variance = budget - actual;
-    const consumption = budget > 0 ? (actual / budget) * 100 : 0;
-    const variancePct = budget > 0 ? (variance / budget) * 100 : 0;
-    return { budget, actual, remaining, variance, consumption, variancePct };
-  };
+      const variance    = budget - actual;
+      const variancePct = budget > 0 ? (variance / budget) * 100 : 0;
+      const consumption = budget > 0 ? (actual  / budget) * 100 : 0;
+      const months = Object.entries(monthMap).map(([name, v]) => ({ name, ...v }));
+
+      return { budget, actual, remaining, variance, variancePct, consumption,
+               ltdBudget, ltdActual, lcBudget, lcActual, months };
+    };
+
+    return { A: compute(cmpPeriodA, cmpTeam), B: compute(cmpPeriodB, cmpTeam) };
+  }, [data, cmpPeriodA, cmpPeriodB, cmpTeam]);
 
   // Format currency helpers (Traditional integer formatting in BDT/INR style with commas)
   const formatBDT = (num: number): string => {
@@ -933,235 +976,361 @@ export default function OverviewDashboard({ id, data }: OverviewDashboardProps) 
 
       {/* ── Comparison Section ─────────────────────────────────────────────────── */}
       {(() => {
+        const { A: mA, B: mB } = cmpMetrics;
         const labelA = COMPARISON_PERIODS.find(p => p.value === cmpPeriodA)?.label ?? cmpPeriodA;
         const labelB = COMPARISON_PERIODS.find(p => p.value === cmpPeriodB)?.label ?? cmpPeriodB;
-        const mA = computePeriodMetrics(cmpPeriodA, cmpTeam);
-        const mB = computePeriodMetrics(cmpPeriodB, cmpTeam);
 
-        const delta = (a: number, b: number) => {
+        // ── Popover helper ──────────────────────────────────────────────────────
+        const Popover = ({ id, children }: { id: string; children: React.ReactNode }) => (
+          <div className="relative inline-flex" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); setOpenPopover(openPopover === id ? null : id); }}
+              className="ml-1.5 w-[18px] h-[18px] rounded-full bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-500 flex items-center justify-center transition-colors shrink-0"
+            >
+              <Info className="w-2.5 h-2.5" />
+            </button>
+            {openPopover === id && (
+              <div className="absolute bottom-full right-0 mb-2.5 w-72 bg-gray-950 text-white rounded-2xl p-4 shadow-2xl z-50 border border-white/10">
+                {children}
+                <div className="absolute -bottom-[5px] right-4 w-2.5 h-2.5 bg-gray-950 border-r border-b border-white/10 rotate-45" />
+              </div>
+            )}
+          </div>
+        );
+
+        // ── Delta badge ─────────────────────────────────────────────────────────
+        const Delta = ({ a, b, lowerIsBetter = false }: { a: number; b: number; lowerIsBetter?: boolean }) => {
+          if (a === 0 && b === 0) return <span className="text-[10px] text-gray-300 font-semibold">—</span>;
           const diff = b - a;
-          const pct = a !== 0 ? (diff / Math.abs(a)) * 100 : 0;
-          return { diff, pct };
-        };
-
-        const DeltaBadge = ({ a, b, invertColor = false }: { a: number; b: number; invertColor?: boolean }) => {
-          const { diff, pct } = delta(a, b);
-          if (diff === 0) return <span className="text-[10px] text-gray-400">—</span>;
+          const pct = a !== 0 ? (diff / Math.abs(a)) * 100 : (b !== 0 ? 100 : 0);
+          if (Math.abs(pct) < 0.05) return <span className="text-[10px] text-gray-400 font-semibold">≈ 0%</span>;
           const isUp = diff > 0;
-          const isGood = invertColor ? !isUp : isUp;
+          const isGood = lowerIsBetter ? !isUp : isUp;
           return (
-            <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold ${isGood ? "text-emerald-600" : "text-rose-500"}`}>
+            <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${
+              isGood ? "text-emerald-700 bg-emerald-50" : "text-rose-600 bg-rose-50"
+            }`}>
               {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
               {isUp ? "+" : ""}{pct.toFixed(1)}%
             </span>
           );
         };
 
-        const MetricRow = ({ label, vA, vB, fmt, invertColor = false }: {
-          label: string; vA: number; vB: number;
-          fmt: (n: number) => string; invertColor?: boolean;
-        }) => (
-          <div className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
-            <span className="text-xs text-gray-500 w-28 shrink-0">{label}</span>
-            <span className="text-xs font-bold text-blue-700 w-32 text-right">{fmt(vA)}</span>
-            <div className="flex justify-center w-24">
-              <DeltaBadge a={vA} b={vB} invertColor={invertColor} />
-            </div>
-            <span className="text-xs font-bold text-slate-800 w-32 text-left pl-2">{fmt(vB)}</span>
+        // ── Popover content builders ─────────────────────────────────────────────
+        const EntityRows = ({ m }: { m: typeof mA }) => (
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mb-1">Entity Breakdown</p>
+            {[["10MS LTD", m.ltdBudget, m.ltdActual], ["Learning Center", m.lcBudget, m.lcActual]].map(([name, b, a]) => (
+              <div key={String(name)} className="flex items-center justify-between">
+                <span className="text-gray-400 text-[11px]">{name}</span>
+                <div className="text-right">
+                  <div className="text-white text-[11px] font-semibold">{formatBDT(Number(b))}</div>
+                  <div className="text-gray-500 text-[10px]">Actual: {formatBDT(Number(a))}</div>
+                </div>
+              </div>
+            ))}
           </div>
         );
 
+        const MonthRows = ({ m }: { m: typeof mA }) =>
+          m.months.length > 0 ? (
+            <div className="mt-3 space-y-1.5 border-t border-white/10 pt-3">
+              <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mb-1">Monthly Breakdown</p>
+              {m.months.map(mo => (
+                <div key={mo.name} className="flex items-center justify-between">
+                  <span className="text-gray-400 text-[11px]">{mo.name}</span>
+                  <div className="text-right">
+                    <div className="text-white text-[11px] font-semibold">{formatBDT(mo.budget)}</div>
+                    <div className="text-gray-500 text-[10px]">Actual: {formatBDT(mo.actual)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null;
+
+        const BudgetPopover = ({ m, pid }: { m: typeof mA; pid: string }) => (
+          <Popover id={pid}>
+            <p className="text-[11px] font-bold text-white mb-1">Budget Breakdown</p>
+            <p className="text-[10px] text-gray-400 mb-2">Total = {formatBDT(m.budget)}</p>
+            <div className="text-[10px] text-gray-400 bg-white/5 rounded-lg px-2.5 py-1.5 font-mono mb-2">
+              {m.months.map(mo => mo.name).join(" + ")} = Total
+            </div>
+            <EntityRows m={m} />
+            <MonthRows m={m} />
+          </Popover>
+        );
+
+        const ActualPopover = ({ m, pid }: { m: typeof mA; pid: string }) => (
+          <Popover id={pid}>
+            <p className="text-[11px] font-bold text-white mb-1">Actual Spend Breakdown</p>
+            <p className="text-[10px] text-gray-400 mb-2">Total = {formatBDT(m.actual)}</p>
+            <EntityRows m={m} />
+            <MonthRows m={m} />
+            {m.months.some(mo => mo.name === "April") && (
+              <p className="mt-2 text-[10px] text-amber-400/80 border-t border-white/10 pt-2">
+                ⚠ April actual = budget (no separate April actuals tracked)
+              </p>
+            )}
+          </Popover>
+        );
+
+        const RemPopover = ({ m, pid }: { m: typeof mA; pid: string }) => (
+          <Popover id={pid}>
+            <p className="text-[11px] font-bold text-white mb-1">Remaining Calculation</p>
+            <div className="text-[10px] text-gray-400 bg-white/5 rounded-lg px-2.5 py-2 font-mono space-y-0.5 mb-2">
+              <div>Budget  = {formatBDT(m.budget)}</div>
+              <div>Actual  = {formatBDT(m.actual)}</div>
+              <div className="border-t border-white/10 pt-1 text-white font-semibold">Remaining = {formatBDT(m.remaining)}</div>
+            </div>
+            <p className="text-[10px] text-gray-500">Note: Remaining is taken directly from sheet remaining columns.</p>
+          </Popover>
+        );
+
+        const VarPopover = ({ m, pid }: { m: typeof mA; pid: string }) => (
+          <Popover id={pid}>
+            <p className="text-[11px] font-bold text-white mb-1">Variance Calculation</p>
+            <div className="text-[10px] text-gray-400 bg-white/5 rounded-lg px-2.5 py-2 font-mono space-y-0.5">
+              <div>Budget   = {formatBDT(m.budget)}</div>
+              <div>Actual   = {formatBDT(m.actual)}</div>
+              <div className="border-t border-white/10 pt-1">Variance = Budget − Actual</div>
+              <div>         = {formatBDT(m.variance)}</div>
+              <div className="text-white font-semibold">Variance % = {(m.variancePct >= 0 ? "+" : "")}{m.variancePct.toFixed(2)}%</div>
+            </div>
+          </Popover>
+        );
+
+        const ConsPopover = ({ m, pid }: { m: typeof mA; pid: string }) => (
+          <Popover id={pid}>
+            <p className="text-[11px] font-bold text-white mb-1">Consumption Rate</p>
+            <div className="text-[10px] text-gray-400 bg-white/5 rounded-lg px-2.5 py-2 font-mono space-y-0.5">
+              <div>Actual   = {formatBDT(m.actual)}</div>
+              <div>Budget   = {formatBDT(m.budget)}</div>
+              <div className="border-t border-white/10 pt-1">Formula = Actual ÷ Budget × 100</div>
+              <div className="text-white font-semibold">       = {m.consumption.toFixed(2)}%</div>
+            </div>
+          </Popover>
+        );
+
+        // ── Row config ──────────────────────────────────────────────────────────
+        type RowDef = {
+          icon: React.ReactNode;
+          label: string;
+          subLabel: string;
+          valA: string;
+          valB: string;
+          rawA: number;
+          rawB: number;
+          lowerIsBetter?: boolean;
+          popA: React.ReactNode;
+          popB: React.ReactNode;
+        };
+
+        const rows: RowDef[] = [
+          {
+            icon: <Wallet className="w-4 h-4 text-blue-500" />,
+            label: "Budget", subLabel: "Total allocated",
+            valA: formatBDT(mA.budget), valB: formatBDT(mB.budget),
+            rawA: mA.budget, rawB: mB.budget,
+            popA: <BudgetPopover m={mA} pid="bud-a" />,
+            popB: <BudgetPopover m={mB} pid="bud-b" />,
+          },
+          {
+            icon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
+            label: "Actual Spend", subLabel: "Audited disbursement",
+            valA: formatBDT(mA.actual), valB: formatBDT(mB.actual),
+            rawA: mA.actual, rawB: mB.actual, lowerIsBetter: true,
+            popA: <ActualPopover m={mA} pid="act-a" />,
+            popB: <ActualPopover m={mB} pid="act-b" />,
+          },
+          {
+            icon: <CheckCircle className="w-4 h-4 text-teal-500" />,
+            label: "Remaining", subLabel: "Uncommitted funds",
+            valA: formatBDT(mA.remaining), valB: formatBDT(mB.remaining),
+            rawA: mA.remaining, rawB: mB.remaining,
+            popA: <RemPopover m={mA} pid="rem-a" />,
+            popB: <RemPopover m={mB} pid="rem-b" />,
+          },
+          {
+            icon: <ArrowRightLeft className="w-4 h-4 text-violet-500" />,
+            label: "Variance %", subLabel: "(Budget − Actual) / Budget",
+            valA: (mA.variancePct >= 0 ? "+" : "") + mA.variancePct.toFixed(1) + "%",
+            valB: (mB.variancePct >= 0 ? "+" : "") + mB.variancePct.toFixed(1) + "%",
+            rawA: mA.variancePct, rawB: mB.variancePct,
+            popA: <VarPopover m={mA} pid="var-a" />,
+            popB: <VarPopover m={mB} pid="var-b" />,
+          },
+          {
+            icon: <Percent className="w-4 h-4 text-orange-500" />,
+            label: "Consumption %", subLabel: "Actual / Budget × 100",
+            valA: mA.consumption.toFixed(1) + "%", valB: mB.consumption.toFixed(1) + "%",
+            rawA: mA.consumption, rawB: mB.consumption, lowerIsBetter: true,
+            popA: <ConsPopover m={mA} pid="con-a" />,
+            popB: <ConsPopover m={mB} pid="con-b" />,
+          },
+        ];
+
         const cmpChartData = [
-          { name: "Budget", A: mA.budget, B: mB.budget },
-          { name: "Actual", A: mA.actual, B: mB.actual },
+          { name: "Budget",    A: mA.budget,    B: mB.budget },
+          { name: "Actual",    A: mA.actual,    B: mB.actual },
           { name: "Remaining", A: mA.remaining, B: mB.remaining },
         ];
 
         return (
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            {/* Header */}
-            <div className="px-6 pt-6 pb-4 border-b border-gray-100">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h3 className="font-bold text-gray-800 text-[15px] flex items-center gap-2">
-                    <GitCompareArrows className="w-5 h-5 text-indigo-500" />
-                    Comparison
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Compare any two quarters or months side by side — independent of the filters above.
-                  </p>
-                </div>
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+
+            {/* ── Header ─────────────────────────────────────────────────────── */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 to-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <GitCompareArrows className="w-5 h-5 text-blue-400" />
+                  Comparison
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Compare any two quarters or months — independent of the filters above.
+                </p>
               </div>
+              {cmpTeam !== "ALL" && (
+                <span className="text-[11px] font-bold text-blue-300 bg-blue-900/40 border border-blue-700/40 px-3 py-1 rounded-full self-start sm:self-auto">
+                  {cmpTeam}
+                </span>
+              )}
             </div>
 
-            {/* Comparison Filters */}
-            <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-4">
-              {/* Team */}
-              <div className="min-w-[180px]">
-                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-1.5 flex items-center gap-1">
-                  <Building2 className="w-3 h-3 text-blue-500" /> Team / Department
+            {/* ── Filters ────────────────────────────────────────────────────── */}
+            <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-3">
+              <div className="min-w-[190px]">
+                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-1.5">
+                  Team / Department
                 </label>
                 <div className="relative">
-                  <select
-                    value={cmpTeam}
-                    onChange={e => setCmpTeam(e.target.value)}
-                    className="appearance-none w-full bg-white border border-gray-200 text-gray-800 text-xs font-semibold rounded-lg pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
-                  >
+                  <select value={cmpTeam} onChange={e => setCmpTeam(e.target.value)}
+                    className="appearance-none w-full bg-white border border-gray-200 text-gray-800 text-xs font-semibold rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-pointer">
                     <option value="ALL">All Teams</option>
                     {uniqueTeams.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
                   </div>
                 </div>
               </div>
 
-              {/* Period A */}
               <div className="min-w-[160px]">
-                <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">
-                  Period A
-                </label>
+                <label className="block text-[10px] font-black uppercase text-blue-500 tracking-wider mb-1.5">Period A</label>
                 <div className="relative">
-                  <select
-                    value={cmpPeriodA}
-                    onChange={e => setCmpPeriodA(e.target.value)}
-                    className="appearance-none w-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
-                  >
+                  <select value={cmpPeriodA} onChange={e => setCmpPeriodA(e.target.value)}
+                    className="appearance-none w-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer">
                     {COMPARISON_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-blue-400">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
                   </div>
                 </div>
               </div>
 
-              <div className="pb-2.5 text-sm font-black text-gray-300 select-none">vs</div>
+              <span className="pb-2 text-xs font-black text-gray-300 select-none">vs</span>
 
-              {/* Period B */}
               <div className="min-w-[160px]">
-                <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1.5">
-                  Period B
-                </label>
+                <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1.5">Period B</label>
                 <div className="relative">
-                  <select
-                    value={cmpPeriodB}
-                    onChange={e => setCmpPeriodB(e.target.value)}
-                    className="appearance-none w-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
-                  >
+                  <select value={cmpPeriodB} onChange={e => setCmpPeriodB(e.target.value)}
+                    className="appearance-none w-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer">
                     {COMPARISON_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-indigo-400">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Side-by-side summary cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Period A card */}
-                <div className="bg-blue-50 rounded-xl border border-blue-100 p-5">
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-                    <h4 className="text-sm font-bold text-blue-800">{labelA}</h4>
-                    {cmpTeam !== "ALL" && <span className="text-[10px] text-blue-500 font-semibold bg-blue-100 px-2 py-0.5 rounded-full">{cmpTeam}</span>}
-                  </div>
-                  <div className="space-y-2.5">
-                    {[
-                      { label: "Budget", val: formatBDT(mA.budget) },
-                      { label: "Actual Spend", val: formatBDT(mA.actual) },
-                      { label: "Remaining", val: formatBDT(mA.remaining) },
-                      { label: "Variance", val: (mA.variancePct >= 0 ? "+" : "") + mA.variancePct.toFixed(1) + "%" },
-                      { label: "Consumption", val: mA.consumption.toFixed(1) + "%" },
-                    ].map(({ label, val }) => (
-                      <div key={label} className="flex justify-between items-center text-xs">
-                        <span className="text-blue-600">{label}</span>
-                        <span className="font-bold text-blue-900">{val}</span>
+            {/* ── Comparison Table ────────────────────────────────────────────── */}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[580px]">
+                <thead>
+                  <tr className="border-b-2 border-gray-100">
+                    <th className="text-left py-4 pl-6 pr-3 text-[10px] font-black text-gray-400 uppercase tracking-widest w-44">Metric</th>
+                    <th className="py-4 px-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                        <span className="text-sm font-bold text-blue-700">{labelA}</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Period B card */}
-                <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
-                    <h4 className="text-sm font-bold text-slate-700">{labelB}</h4>
-                    {cmpTeam !== "ALL" && <span className="text-[10px] text-slate-500 font-semibold bg-slate-200 px-2 py-0.5 rounded-full">{cmpTeam}</span>}
-                  </div>
-                  <div className="space-y-2.5">
-                    {[
-                      { label: "Budget", val: formatBDT(mB.budget) },
-                      { label: "Actual Spend", val: formatBDT(mB.actual) },
-                      { label: "Remaining", val: formatBDT(mB.remaining) },
-                      { label: "Variance", val: (mB.variancePct >= 0 ? "+" : "") + mB.variancePct.toFixed(1) + "%" },
-                      { label: "Consumption", val: mB.consumption.toFixed(1) + "%" },
-                    ].map(({ label, val }) => (
-                      <div key={label} className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500">{label}</span>
-                        <span className="font-bold text-slate-800">{val}</span>
+                    </th>
+                    <th className="py-4 px-3 text-center text-[10px] font-black text-gray-300 uppercase tracking-widest w-28">Change →</th>
+                    <th className="py-4 px-4 pr-6 text-left">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-700 shrink-0" />
+                        <span className="text-sm font-bold text-slate-700">{labelB}</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, idx) => (
+                    <tr key={row.label} className={`border-b border-gray-50 transition-colors hover:bg-gray-50/60 ${idx % 2 === 0 ? "" : "bg-gray-50/30"}`}>
+                      {/* Metric label */}
+                      <td className="py-4 pl-6 pr-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                            {row.icon}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-gray-700">{row.label}</p>
+                            <p className="text-[10px] text-gray-400">{row.subLabel}</p>
+                          </div>
+                        </div>
+                      </td>
 
-              {/* Detailed delta table */}
-              <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-                <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-3">
-                  Change from {labelA} → {labelB}
-                </p>
-                {/* Column labels */}
-                <div className="flex items-center justify-between mb-1 px-0">
-                  <span className="text-[10px] text-gray-300 w-28" />
-                  <span className="text-[10px] font-bold text-blue-400 w-32 text-right">{labelA}</span>
-                  <span className="text-[10px] font-bold text-gray-400 w-24 text-center">Change</span>
-                  <span className="text-[10px] font-bold text-slate-500 w-32 pl-2">{labelB}</span>
-                </div>
-                <MetricRow label="Budget" vA={mA.budget} vB={mB.budget} fmt={formatBDT} />
-                <MetricRow label="Actual Spend" vA={mA.actual} vB={mB.actual} fmt={formatBDT} />
-                <MetricRow label="Remaining" vA={mA.remaining} vB={mB.remaining} fmt={formatBDT} />
-                <MetricRow
-                  label="Variance %"
-                  vA={mA.variancePct}
-                  vB={mB.variancePct}
-                  fmt={n => (n >= 0 ? "+" : "") + n.toFixed(1) + "%"}
-                />
-                <MetricRow
-                  label="Consumption %"
-                  vA={mA.consumption}
-                  vB={mB.consumption}
-                  fmt={n => n.toFixed(1) + "%"}
-                  invertColor
-                />
-              </div>
+                      {/* Period A value */}
+                      <td className="py-4 px-4">
+                        <div className="flex items-center justify-end gap-0.5">
+                          <span className="text-sm font-bold text-blue-700 tabular-nums">{row.valA}</span>
+                          {row.popA}
+                        </div>
+                      </td>
 
-              {/* Grouped bar chart */}
-              <div>
-                <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-3">
-                  Visual Comparison — Budget · Actual · Remaining
-                </p>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={cmpChartData} margin={{ top: 4, right: 10, left: -10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} />
-                      <YAxis tickLine={false} axisLine={false} tickFormatter={v => formatCompact(v)} tick={{ fontSize: 10, fill: "#64748b" }} />
-                      <Tooltip
-                        formatter={(value: any) => [formatBDT(Number(value)), undefined]}
-                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "8px", color: "#fff" }}
-                      />
-                      <Legend
-                        iconType="circle"
-                        wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-                        formatter={(value) => value === "A" ? labelA : labelB}
-                      />
-                      <Bar dataKey="A" name="A" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="B" name="B" fill="#1e293b" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                      {/* Delta */}
+                      <td className="py-4 px-3 text-center">
+                        <Delta a={row.rawA} b={row.rawB} lowerIsBetter={row.lowerIsBetter} />
+                      </td>
+
+                      {/* Period B value */}
+                      <td className="py-4 px-4 pr-6">
+                        <div className="flex items-center gap-0.5">
+                          <span className="text-sm font-bold text-slate-800 tabular-nums">{row.valB}</span>
+                          {row.popB}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ── Visual Bar Chart ────────────────────────────────────────────── */}
+            <div className="px-6 pt-4 pb-6 border-t border-gray-100 mt-2">
+              <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-4">
+                Visual Comparison — Budget · Actual · Remaining
+              </p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={cmpChartData} margin={{ top: 4, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={v => formatCompact(v)} tick={{ fontSize: 10, fill: "#64748b" }} />
+                    <Tooltip
+                      formatter={(value: any) => [formatBDT(Number(value)), undefined]}
+                      contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
+                    />
+                    <Legend
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                      formatter={v => v === "A" ? labelA : labelB}
+                    />
+                    <Bar dataKey="A" name="A" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="B" name="B" fill="#1e293b" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </div>
